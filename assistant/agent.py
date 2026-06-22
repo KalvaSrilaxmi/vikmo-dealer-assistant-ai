@@ -14,6 +14,7 @@ Strict Operational Guidelines:
 3. Ambiguity: If a user's request is ambiguous (e.g., "I need brake pads", "I want an oil filter"), do not assume the part or vehicle. Instead, ask a clarifying question to determine the vehicle make/model (e.g., "For which vehicle?").
 4. Pricing & Currency: All prices are in Indian Rupees (INR, ₹). Format them clearly.
 5. Order Creation: To place an order, you must call the `create_order` tool. You must collect the dealer's name and a list of line items (with SKUs and quantities). If the SKU, quantity, or dealer name is missing, ask clarifying questions before calling the tool. Format the success receipt as structured Markdown (total price, items, order ID).
+6. Tool Calls: You MUST invoke the appropriate tool (`find_parts_by_vehicle` or `check_stock`) whenever the user asks about parts for a specific vehicle, or asks about the price/stock/details of a specific SKU/part. Do not just reply using the provided semantic search context; you must call the tools to query the active database.
 
 Expected Conversation Flow Example:
 User: I need brake pads.
@@ -49,6 +50,18 @@ def load_env():
                     k = parts[0].strip()
                     v = parts[1].strip().strip('"').strip("'")
                     os.environ[k] = v
+
+def clean_args(val):
+    """
+    Recursively converts protobuf MapComposite/List objects to native Python dicts/lists.
+    This prevents protobuf type errors inside the python tools.
+    """
+    if hasattr(val, 'items') or isinstance(val, dict):
+        return {k: clean_args(v) for k, v in val.items()}
+    elif isinstance(val, list) or (hasattr(val, '__iter__') and not isinstance(val, (str, bytes))):
+        return [clean_args(x) for x in val]
+    else:
+        return val
 
 class GeminiAgent:
     """
@@ -168,7 +181,7 @@ class GeminiAgent:
                     parts_dicts.append({
                         "function_call": {
                             "name": part.function_call.name,
-                            "args": dict(part.function_call.args)
+                            "args": clean_args(dict(part.function_call.args))
                         }
                     })
                 elif part.text:
@@ -183,7 +196,7 @@ class GeminiAgent:
             tool_response_parts = []
             for function_call in function_calls:
                 fn_name = function_call.name
-                fn_args = dict(function_call.args)
+                fn_args = clean_args(dict(function_call.args))
                 
                 print(f"[Agent] Executing tool '{fn_name}' with args: {fn_args}")
                 self.tool_calls_log.append(fn_name)
