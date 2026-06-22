@@ -1,0 +1,86 @@
+[
+  {
+    "id": 1,
+    "category": "Happy path",
+    "query": "Do you have TVS brake pads for the Bajaj Pulsar 150?",
+    "expected_tool": "find_parts_by_vehicle",
+    "description": "Verifies that the agent calls find_parts_by_vehicle with both vehicle_fitment and part_type (or category) specified."
+  },
+  {
+    "id": 2,
+    "category": "Happy path",
+    "query": "I want to check the details and price for spark plug FIL-1002.",
+    "expected_tool": "check_stock",
+    "description": "Verifies that the agent correctly identifies a direct check of stock/details for a specific SKU."
+  },
+  {
+    "id": 3,
+    "category": "Ambiguous",
+    "query": "I need some brake pads.",
+    "expected_tool": "None",
+    "description": "Verifies that the agent does not assume the vehicle model and instead asks the user a clarifying question (e.g., 'for which bike/car?')."
+  },
+  {
+    "id": 4,
+    "category": "Ambiguous",
+    "query": "Do you have any filters in stock?",
+    "expected_tool": "None",
+    "description": "Verifies that the agent asks a clarifying question about the vehicle fitment or filter type before returning details."
+  },
+  {
+    "id": 5,
+    "category": "Stock queries",
+    "query": "Is SKU BRK-1036 in stock right now?",
+    "expected_tool": "check_stock",
+    "description": "Verifies that the agent invokes check_stock to verify stock level of a specific SKU."
+  },
+  {
+    "id": 6,
+    "category": "Stock queries",
+    "query": "Check if SKU FIL-1001 is available and tell me the price.",
+    "expected_tool": "check_stock",
+    "description": "Verifies that the agent calls check_stock to get both stock level and price information."
+  },
+  {
+    "id": 7,
+    "category": "Vehicle fitment queries",
+    "query": "What parts do you have that fit the KTM Duke 390?",
+    "expected_tool": "find_parts_by_vehicle",
+    "description": "Verifies that the agent calls find_parts_by_vehicle with vehicle_fitment='KTM Duke 390'."
+  },
+  {
+    "id": 8,
+    "category": "Vehicle fitment queries",
+    "query": "List all accessories compatible with Kia Seltos.",
+    "expected_tool": "find_parts_by_vehicle",
+    "description": "Verifies that the agent calls find_parts_by_vehicle with vehicle_fitment='Kia Seltos'."
+  },
+  {
+    "id": 9,
+    "category": "Order creation queries",
+    "query": "Place an order for 10 units of FIL-1001 for ABC Motors.",
+    "expected_tool": "create_order",
+    "description": "Verifies that the agent calls create_order with dealer_name='ABC Motors' and item SKU='FIL-1001', quantity=10."
+  },
+  {
+    "id": 10,
+    "category": "Order creation queries",
+    "query": "Create an order for 5 units of BRK-1002 and 2 units of FIL-1001 for TVS Services.",
+    "expected_tool": "create_order",
+    "description": "Verifies that the agent handles multiple items in a single create_order tool call."
+  },
+  {
+    "id": 11,
+    "category": "Out-of-domain queries",
+    "query": "What is the weather in Mumbai today?",
+    "expected_tool": "None",
+    "description": "Verifies that the agent remains on-domain and politely refuses to answer off-topic queries."
+  },
+  {
+    "id": 12,
+    "category": "Out-of-domain queries",
+    "query": "Can you give me a recipe for chocolate chip cookies?",
+    "expected_tool": "None",
+    "description": "Verifies that the agent guardrails are active and declines the request to write a baking recipe."
+  }
+]
