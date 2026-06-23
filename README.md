@@ -35,7 +35,11 @@ This repository contains the complete implementation for the VIKMO AI/ML Intern 
 ## 2. Tech Stack
 
 - **Language**: Python 3.13+
-- **LLM API Provider**: Google Gemini 1.5 Flash (utilizes `google-generativeai` SDK)
+- **LLM Abstraction Layer**: Custom resilient multi-provider abstraction supporting:
+  - **Google Gemini** (via native `google-generativeai` SDK)
+  - **Groq Cloud API** (via HTTP endpoints using Llama 3)
+  - **Ollama** (via local model endpoints like `llama3`)
+  - **Local Demo Mode** (keyless, offline rule-based agent emulator)
 - **Vector Database**: FAISS (local `faiss-cpu`)
 - **Embedding Model**: SentenceTransformers (`all-MiniLM-L6-v2`)
 - **Forecasting Regressor**: Scikit-Learn (`RandomForestRegressor`)
@@ -52,15 +56,47 @@ pip install -r requirements.txt
 ```
 
 ### Step 2: Configure Environment Variables
-You need a Google Gemini API Key to run the assistant and the evaluator.
-You can either set it in your environment:
-- **Windows (PowerShell)**: `$env:GEMINI_API_KEY="your_api_key"`
-- **Windows (CMD)**: `set GEMINI_API_KEY=your_api_key`
-- **Linux/macOS**: `export GEMINI_API_KEY="your_api_key"`
+The assistant features a resilient abstraction layer. You can configure multiple providers and fallbacks.
+
+Key configuration variables:
+- `LLM_PROVIDER`: Set to `gemini`, `groq`, `ollama`, or `demo` (default: `gemini`).
+- `FALLBACK_PROVIDERS`: Comma-separated order of fallback providers if the primary fails (default: `groq,demo`).
+- `DEMO_MODE`: Set to `true` to run offline/keyless local Demo Mode immediately.
+- `GEMINI_API_KEY`: API Key for Google Gemini.
+- `GROQ_API_KEY`: API Key for Groq Cloud API.
+- `GROQ_MODEL`: Groq model name (default: `llama3-8b-8192`).
+- `OLLAMA_MODEL`: Ollama model name (default: `llama3`).
+- `OLLAMA_HOST`: Local Ollama service host (default: `http://localhost:11434`).
+
+You can set these in your environment:
+- **Windows (PowerShell)**:
+  ```powershell
+  $env:LLM_PROVIDER="gemini"
+  $env:GEMINI_API_KEY="your_api_key"
+  ```
+- **Linux/macOS**:
+  ```bash
+  export LLM_PROVIDER="gemini"
+  export GEMINI_API_KEY="your_api_key"
+  ```
+
+To run without any API keys or external connections (ideal for review and validation), configure the assistant to run in **Demo Mode**:
+- **Windows (PowerShell)**:
+  ```powershell
+  $env:DEMO_MODE="true"
+  ```
+- **Linux/macOS**:
+  ```bash
+  export DEMO_MODE="true"
+  ```
 
 Alternatively, create a file named `.env` in the root directory of the workspace:
 ```env
-GEMINI_API_KEY=your_api_key_here
+DEMO_MODE=true
+# Or configure keys
+# LLM_PROVIDER=gemini
+# GEMINI_API_KEY=your_key
+# FALLBACK_PROVIDERS=groq,demo
 ```
 The agent loads `.env` variables automatically.
 

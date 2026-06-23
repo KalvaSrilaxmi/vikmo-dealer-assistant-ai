@@ -1,9 +1,9 @@
 import os
 import json
-import google.generativeai as genai
 from assistant.retriever import CatalogueRetriever
 from assistant.memory import ConversationMemory
 import assistant.tools as assistant_tools
+from assistant.llm import GeminiProvider, GroqProvider, OllamaProvider, DemoProvider
 
 # System Instruction Persona and Rules
 SYSTEM_INSTRUCTION = """You are VIKMO Auto-Parts Assistant, a knowledgeable and agentic virtual assistant representing VIKMO Auto Parts. Your target users are auto-parts dealers.
@@ -65,23 +65,13 @@ def clean_args(val):
 
 class GeminiAgent:
     """
-    Orchestrates the conversational agent loop using Gemini, FAISS RAG,
-    conversation memory, and tool routing.
+    Orchestrates the conversational agent loop, supporting local RAG,
+    resilient LLM abstraction (Gemini, Groq, Ollama), keyless Demo Mode,
+    and automatic failover handling.
     """
     def __init__(self, model_name: str = "gemini-2.5-flash"):
         load_env()
-        # Load API key
-        api_key = os.environ.get("GEMINI_API_KEY")
-        if not api_key:
-            raise ValueError("GEMINI_API_KEY environment variable is not set. Please set it before running the agent.")
-        genai.configure(api_key=api_key)
-        
         self.model_name = model_name
-        self.model = genai.GenerativeModel(
-            model_name=self.model_name,
-            system_instruction=SYSTEM_INSTRUCTION
-        )
-        
         self.retriever = CatalogueRetriever()
         self.memory = ConversationMemory()
         
@@ -99,12 +89,66 @@ class GeminiAgent:
             assistant_tools.create_order
         ]
         self.tool_calls_log = []
+        
+        # Read provider settings and fallback pipeline
+        self.fallback_pipeline = [p.strip().lower() for p in os.environ.get("FALLBACK_PROVIDERS", "groq,demo").split(",") if p.strip()]
+        
+        # Initialize selected provider
+        self.active_provider_name = os.environ.get("LLM_PROVIDER", "gemini").strip().lower()
+        if os.environ.get("DEMO_MODE", "false").strip().lower() in ("true", "yes", "1"):
+            self.active_provider_name = "demo"
+            
+        self.provider = None
+        self._init_active_provider()
+
+    def _init_active_provider(self):
+        """
+        Attempts to initialize the active provider. If initialization fails,
+        automatically routes to the fallback pipeline.
+        """
+        try:
+            self.provider = self._create_provider_instance(self.active_provider_name)
+            print(f"[Agent] Active LLM Provider initialized: {self.active_provider_name.upper()}")
+        except Exception as e:
+            print(f"[Warning] Failed to initialize provider '{self.active_provider_name}': {e}")
+            self._route_to_fallback()
+
+    def _create_provider_instance(self, name: str):
+        if name == "gemini":
+            return GeminiProvider(system_instruction=SYSTEM_INSTRUCTION, model_name=self.model_name)
+        elif name == "groq":
+            return GroqProvider(system_instruction=SYSTEM_INSTRUCTION)
+        elif name == "ollama":
+            return OllamaProvider(system_instruction=SYSTEM_INSTRUCTION)
+        elif name == "demo":
+            return DemoProvider(system_instruction=SYSTEM_INSTRUCTION)
+        else:
+            raise ValueError(f"Unknown LLM provider: {name}")
+
+    def _route_to_fallback(self):
+        """
+        Pops the next fallback provider from the pipeline and instantiates it.
+        """
+        while self.fallback_pipeline:
+            next_provider = self.fallback_pipeline.pop(0)
+            print(f"[Agent] Attempting to fall back to: {next_provider.upper()}")
+            try:
+                self.provider = self._create_provider_instance(next_provider)
+                self.active_provider_name = next_provider
+                print(f"[Agent] Successfully switched to fallback provider: {next_provider.upper()}")
+                return
+            except Exception as e:
+                print(f"[Warning] Failed to initialize fallback '{next_provider}': {e}")
+                
+        # If pipeline exhausted, default to Demo mode
+        print("[Agent] Fallback pipeline exhausted. Initializing local DEMO MODE (keyless).")
+        self.provider = DemoProvider(system_instruction=SYSTEM_INSTRUCTION)
+        self.active_provider_name = "demo"
 
     def reset(self):
         """Clears memory and resets the inventory state."""
         self.memory.clear()
         self.tool_calls_log.clear()
-        # Reset inventory state by deleting state file to force copy from source
         if os.path.exists(assistant_tools.STATE_PATH):
             try:
                 os.remove(assistant_tools.STATE_PATH)
@@ -114,8 +158,9 @@ class GeminiAgent:
 
     def process_message(self, user_message: str) -> str:
         """
-        Processes a user message, performs RAG retrieval, invokes Gemini,
+        Processes a user message, performs RAG retrieval, invokes active LLM,
         handles tool execution loop, and updates conversation history.
+        Implements automatic fallback if providers crash or hit quotas.
         """
         # 1. Query the semantic retriever to get grounding context for the user's input
         rag_results = []
@@ -137,7 +182,6 @@ class GeminiAgent:
             context_block += "No direct matches found in catalogue.\n"
             
         # 2. Append User Message with context block
-        # We present the context block to the model alongside the user query
         augmented_message = f"{user_message}\n\n{context_block}"
         self.memory.add_user_message(augmented_message)
         
@@ -145,28 +189,33 @@ class GeminiAgent:
         max_turns = 5
         turn = 0
         
-        # Format the memory history for Gemini API
         contents = list(self.memory.get_history())
 
         while turn < max_turns:
-            response = self.model.generate_content(
-                contents=contents,
-                tools=self.tools_list
-            )
-            
-            # Check if there are function calls requested
-            function_calls = []
-            if response.candidates and response.candidates[0].content.parts:
-                for part in response.candidates[0].content.parts:
-                    if part.function_call:
-                        function_calls.append(part.function_call)
-            
-            if not function_calls:
+            # Generate content using resilient provider wrapping
+            response = None
+            retries = 3
+            while retries > 0:
+                try:
+                    response = self.provider.generate_content(
+                        contents=contents,
+                        tools=self.tools_list
+                    )
+                    break
+                except Exception as e:
+                    print(f"[Warning] LLM Provider '{self.active_provider_name}' error: {e}")
+                    self._route_to_fallback()
+                    contents = list(self.memory.get_history()) # Refresh history format if needed
+                    retries -= 1
+                    
+            if response is None:
+                return "I am sorry, I encountered issues communicating with all configured LLM providers."
+
+            if not response.tool_calls:
                 # No tools to call, append response to memory and return
                 final_text = response.text if response.text else "I am sorry, I encountered an issue generating a response."
                 
                 # Clean up context block in memory for clean multi-turn tracking
-                # Replace the last user message with just the original query to avoid bloated context history
                 history = self.memory.get_history()
                 if history and history[-1]['role'] == 'user' and augmented_message in history[-1]['parts'][0]:
                     history[-1]['parts'] = [user_message]
@@ -176,16 +225,15 @@ class GeminiAgent:
             
             # Record the model's tool calls in memory/history
             parts_dicts = []
-            for part in response.candidates[0].content.parts:
-                if part.function_call:
-                    parts_dicts.append({
-                        "function_call": {
-                            "name": part.function_call.name,
-                            "args": clean_args(dict(part.function_call.args))
-                        }
-                    })
-                elif part.text:
-                    parts_dicts.append(part.text)
+            if response.text:
+                parts_dicts.append(response.text)
+            for tc in response.tool_calls:
+                parts_dicts.append({
+                    "function_call": {
+                        "name": tc["name"],
+                        "args": clean_args(tc["args"])
+                    }
+                })
                     
             self.memory.add_raw_message({
                 "role": "model",
@@ -194,9 +242,9 @@ class GeminiAgent:
             
             # Execute all function calls and build the response content parts
             tool_response_parts = []
-            for function_call in function_calls:
-                fn_name = function_call.name
-                fn_args = clean_args(dict(function_call.args))
+            for tc in response.tool_calls:
+                fn_name = tc["name"]
+                fn_args = clean_args(tc["args"])
                 
                 print(f"[Agent] Executing tool '{fn_name}' with args: {fn_args}")
                 self.tool_calls_log.append(fn_name)
@@ -209,7 +257,6 @@ class GeminiAgent:
                 else:
                     tool_result = {"status": "ERROR", "error": f"Tool '{fn_name}' not implemented."}
                 
-                # Format function response part for Gemini API as dict
                 tool_response_parts.append({
                     "function_response": {
                         "name": fn_name,
@@ -225,7 +272,6 @@ class GeminiAgent:
             
             # Rebuild contents from history for the next turn
             contents = list(self.memory.get_history())
-            
             turn += 1
             
         return "I apologize, but I reached the maximum tool execution loops without completing the task."

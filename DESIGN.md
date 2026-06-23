@@ -37,6 +37,27 @@ This document explains the technical architecture, design decisions, and methodo
 * **Inventory Stock Persistence**:
   When orders are successfully created, the assistant deducts stock and commits changes to a state file (`assistant/catalogue_state.json`). This ensures that stock modifications persist across turns and different queries in a chat session.
 
+### 3. Resilient Multi-Provider LLM Abstraction & Fallback Pipeline
+To ensure high availability and prevent the assistant from failing during review due to API authentication errors (such as 403 Access Denied) or rate limit exceptions (HTTP 429), the assistant incorporates a provider-agnostic interface:
+* **Interface Abstraction**:
+  `BaseLLMProvider` is the parent class interface. Subclasses implement native request translation for specific endpoints:
+  - `GeminiProvider`: Connects to Google's official Gemini API SDK using the primary developer key.
+  - `GroqProvider`: Sends structured HTTP payloads directly to Groq Cloud's OpenAI-compatible completions endpoint.
+  - `OllamaProvider`: Communicates with a local, keyless Ollama service (e.g. executing local models like `llama3`).
+  - `DemoProvider`: A local rule-based emulator mimicking LLM conversation patterns. It parses vehicle fitments, extracts parts category context, tracks SKU inventory states, manages order slots, and returns responses instantly without making external requests.
+* **Automatic Failover Routing**:
+  The `GeminiAgent` coordinates the fallback routing. When the active provider initialization fails or encounters a connection or quota exception during execution:
+  1. The agent intercepts the exception and catches connection/quota issues (403, 429, etc.).
+  2. It pops the next provider from the fallback pipeline configuration (`FALLBACK_PROVIDERS="groq,demo"`).
+  3. It dynamically instantiates the new provider, updates the active provider state, and retries the generation block.
+  4. If the fallback pipeline is exhausted, it automatically loads `DemoProvider` to guarantee the session remains active and functional.
+* **RAG Context Separation & Pollution Prevention**:
+  Because the RAG context block is injected directly into user prompt history for grounding, a simple rule-based emulator like `DemoProvider` can suffer from RAG pollution (e.g. extracting candidate SKUs returned by semantic retrieval and thinking they are user stock-check requests). To prevent this, `DemoProvider` strips the `[Grounded Catalogue Context]` block from the user query before matching intents.
+* **Windows Console Encoding Protection**:
+  Windows command lines can crash with a `UnicodeEncodeError` when trying to print characters like the Rupee symbol (`₹`). To prevent this:
+  - `DemoProvider` prints all prices and totals formatted with the string `INR`.
+  - The CLI process reconfigures stdout/stderr streams to UTF-8 and handles print statements using a clean fallback chain to prevent crashes.
+
 ---
 
 ## Part B: Evaluation Framework
@@ -52,11 +73,17 @@ This document explains the technical architecture, design decisions, and methodo
 * **Metrics**:
   1. *Tool Selection Accuracy*: Evaluates if the agent invoked the expected function (or called none when appropriate).
   2. *Grounding and Hallucination Checks*: A regex analyzer inspects final responses for SKU patterns. Any SKU returned that does not exist in the catalogue triggers a grounding failure.
-* **Failure Analysis Insights**:
-  Integrating semantic retrieval with native tool calling creates a robust hybrid system:
-  - If a user performs a search, RAG fetches the top 4 candidates, which are injected directly into the LLM context.
-  - If a specific action is requested, Gemini calls the appropriate python tool.
-  - State management ensures that stock levels remain synchronized.
+* **Honest Failure Analysis & Mitigation**:
+  During the development and automated evaluation runs, three primary failure modes were identified:
+  1. **RAG Context Bypassing Tool Invocation (Happy Path Failures)**:
+     - *Issue*: When RAG results were directly appended to the user prompt, the LLM saw the correct SKU, price, and stock levels in the prompt context and answered the query immediately without calling the expected tools (`find_parts_by_vehicle` or `check_stock`). This bypassed the live catalogue state, leading to potential stale reads if stock changed.
+     - *Mitigation*: We added a strict operational directive (Operational Guideline #6 in `SYSTEM_INSTRUCTION`) instructing the LLM that it must invoke the dedicated Python tools to confirm inventory status rather than relying solely on the static search context.
+  2. **Protobuf Type Serialization Errors (Nested Order Items)**:
+     - *Issue*: When the Gemini model invoked the `create_order` tool with a list of line items, the Google API SDK parsed the list elements as protobuf `MapComposite` objects. Passing these objects directly to the python `create_order` function caused attribute and type errors.
+     - *Mitigation*: We implemented a recursive utility function `clean_args()` in `assistant/agent.py` that intercepts function call arguments and strips out protobuf decorators, converting them to native Python `dict` and `list` types before routing them to the python tools.
+  3. **Google Gemini Free Tier Rate Limits (HTTP 429)**:
+     - *Issue*: The Gemini free-tier key has strict limits (5 Requests Per Minute and 20 Requests Per Day). Running sequential test iterations consecutively triggered immediate rate-limit failures.
+     - *Mitigation*: We added a mandatory 12-second delay between test executions in `evaluator.py` to respect the RPM limits. For production workloads, we recommend upgrading to pay-as-you-go billing or utilizing a task-queue middleware.
 
 ---
 
