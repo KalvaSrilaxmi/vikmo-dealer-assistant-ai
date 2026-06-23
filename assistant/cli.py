@@ -20,10 +20,10 @@ def main():
         
     load_env()
     
-    provider_name = os.environ.get("LLM_PROVIDER", "gemini").strip().lower()
+    provider_name = os.environ.get("LLM_PROVIDER", "ollama").strip().lower()
     if os.environ.get("DEMO_MODE", "false").strip().lower() in ("true", "yes", "1"):
         provider_name = "demo"
-    fallback_pipeline_str = os.environ.get("FALLBACK_PROVIDERS", "groq,ollama,demo").strip()
+    fallback_pipeline_str = os.environ.get("FALLBACK_PROVIDERS", "gemini,groq,demo").strip()
     fallback_chain_list = [p.strip().capitalize() for p in fallback_pipeline_str.split(",") if p.strip()]
     fallback_chain = " -> ".join(fallback_chain_list)
     

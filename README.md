@@ -59,18 +59,28 @@ pip install -r requirements.txt
 The assistant features a resilient abstraction layer. You can configure multiple LLM providers and fallbacks.
 
 Key configuration variables:
-- `LLM_PROVIDER`: Set to `gemini`, `groq`, `ollama`, or `demo` (default: `gemini`).
-- `FALLBACK_PROVIDERS`: Comma-separated order of fallback providers if the primary fails (default: `groq,ollama,demo`).
+- `LLM_PROVIDER`: Set to `ollama`, `gemini`, `groq`, or `demo` (default: `ollama`).
+- `FALLBACK_PROVIDERS`: Comma-separated order of fallback providers if the primary fails (default: `gemini,groq,demo`).
+- `OLLAMA_MODEL`: Ollama model name (default: `llama3.1`). **(Note: Llama 3.1 or newer is required to support tool calling locally in Ollama; legacy `llama3` does not support tools and will return 400 Bad Request.)**
+- `OLLAMA_HOST`: Local Ollama service host (default: `http://localhost:11434`).
 - `GEMINI_API_KEY`: API Key for Google Gemini.
 - `GROQ_API_KEY`: API Key for Groq Cloud API.
-- `GROQ_MODEL`: Groq model name (default: `llama3-8b-8192`).
-- `OLLAMA_MODEL`: Ollama model name (default: `llama3`).
-- `OLLAMA_HOST`: Local Ollama service host (default: `http://localhost:11434`).
+- `GROQ_MODEL`: Groq model name (default: `llama-3.3-70b-versatile`).
 - `DEMO_MODE`: Set to `true` to run offline/keyless local Demo Mode immediately.
 
 #### Provider Setup & Verification Commands:
 
-1. **Google Gemini (Primary)**:
+1. **Ollama (Primary)**:
+   Ensure Ollama is running locally with a tool-compatible model installed (e.g. `ollama run llama3.1`).
+   Verify with:
+   ```bash
+   # Windows (PowerShell)
+   $env:LLM_PROVIDER="ollama"
+   $env:OLLAMA_MODEL="llama3.1"
+   python assistant/cli.py
+   ```
+
+2. **Google Gemini (First Fallback)**:
    Ensure `GEMINI_API_KEY` is configured in your environment or `.env` file.
    Verify with:
    ```bash
@@ -79,22 +89,12 @@ Key configuration variables:
    python assistant/cli.py
    ```
 
-2. **Groq Cloud (First Fallback)**:
+3. **Groq Cloud (Second Fallback)**:
    Ensure `GROQ_API_KEY` is configured.
    Verify with:
    ```bash
    # Windows (PowerShell)
    $env:LLM_PROVIDER="groq"
-   python assistant/cli.py
-   ```
-
-3. **Ollama (Second Fallback)**:
-   Ensure Ollama is running locally with the target model installed (e.g. `ollama run llama3`).
-   Verify with:
-   ```bash
-   # Windows (PowerShell)
-   $env:LLM_PROVIDER="ollama"
-   $env:OLLAMA_MODEL="llama3"
    python assistant/cli.py
    ```
 
@@ -109,9 +109,9 @@ Key configuration variables:
 
 Alternatively, create a file named `.env` in the root directory of the workspace:
 ```env
-LLM_PROVIDER=gemini
-GEMINI_API_KEY=your_key
-FALLBACK_PROVIDERS=groq,ollama,demo
+LLM_PROVIDER=ollama
+OLLAMA_MODEL=llama3.1
+FALLBACK_PROVIDERS=gemini,groq,demo
 ```
 The agent loads `.env` variables automatically.
 
@@ -139,22 +139,24 @@ python assistant/cli.py
 On CLI startup, the initialized provider, active model, and fallback chain are displayed:
 ```
 ============================================================
-Active Provider : Gemini
-Model           : gemini-2.5-flash
-Fallback Chain  : Groq -> Ollama -> Demo
+Active Provider : Ollama
+Model           : llama3.1
+Fallback Chain  : Gemini -> Groq -> Demo
 ============================================================
 ```
 
-If the active provider fails at runtime (e.g. due to rate limits or invalid keys), the agent logs the specific failure and prints failover warnings:
+If the active provider fails at runtime (e.g. due to connection timeouts or decommissioned models), the agent logs the specific failure and prints failover warnings:
 ```
-[Warning] GEMINI failed (429 Quota Exceeded)
+[Warning] OLLAMA failed (Failed calling Ollama endpoint...)
+Switching to Gemini...
+[Warning] GEMINI failed (403 Your project has been denied access...)
 Switching to Groq...
 Active Provider : Groq
-Model           : llama3-8b-8192
+Model           : llama-3.3-70b-versatile
 ```
 
 Reviewers can trace which provider and model generated each response via the response prefixes:
-`Assistant (via Groq - llama3-8b-8192): I found the following compatible parts:...`
+`Assistant (via Groq - llama-3.3-70b-versatile): I found the following compatible parts:...`
 
 ### B. Run the Automated Agent Evaluation
 Run the test suite against the evaluation cases:

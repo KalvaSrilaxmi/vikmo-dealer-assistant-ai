@@ -187,7 +187,7 @@ class GroqProvider(BaseLLMProvider):
     """
     Implements resilient HTTP interface calling the Groq Cloud API directly.
     """
-    def __init__(self, system_instruction: str = None, model_name: str = "llama3-8b-8192"):
+    def __init__(self, system_instruction: str = None, model_name: str = "llama-3.3-70b-versatile"):
         super().__init__(system_instruction)
         self.model_name = os.environ.get("GROQ_MODEL", model_name)
         self.api_key = os.environ.get("GROQ_API_KEY")
@@ -243,7 +243,7 @@ class OllamaProvider(BaseLLMProvider):
     """
     Implements connection interface calling a local Ollama service.
     """
-    def __init__(self, system_instruction: str = None, model_name: str = "llama3"):
+    def __init__(self, system_instruction: str = None, model_name: str = "llama3.1"):
         super().__init__(system_instruction)
         self.model_name = os.environ.get("OLLAMA_MODEL", model_name)
         self.host = os.environ.get("OLLAMA_HOST", "http://localhost:11434")

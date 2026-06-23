@@ -91,10 +91,10 @@ class GeminiAgent:
         self.tool_calls_log = []
         
         # Read provider settings and fallback pipeline
-        self.fallback_pipeline = [p.strip().lower() for p in os.environ.get("FALLBACK_PROVIDERS", "groq,ollama,demo").split(",") if p.strip()]
+        self.fallback_pipeline = [p.strip().lower() for p in os.environ.get("FALLBACK_PROVIDERS", "gemini,groq,demo").split(",") if p.strip()]
         
         # Initialize selected provider
-        self.active_provider_name = os.environ.get("LLM_PROVIDER", "gemini").strip().lower()
+        self.active_provider_name = os.environ.get("LLM_PROVIDER", "ollama").strip().lower()
         if os.environ.get("DEMO_MODE", "false").strip().lower() in ("true", "yes", "1"):
             self.active_provider_name = "demo"
             

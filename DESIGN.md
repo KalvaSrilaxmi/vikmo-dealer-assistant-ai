@@ -43,17 +43,17 @@ To ensure high availability and prevent the assistant from failing during review
   `BaseLLMProvider` is the parent class interface. Subclasses implement native request translation for specific endpoints:
   - `GeminiProvider`: Connects to Google's official Gemini API SDK using the primary developer key.
   - `GroqProvider`: Sends structured HTTP payloads directly to Groq Cloud's OpenAI-compatible completions endpoint.
-  - `OllamaProvider`: Communicates with a local, keyless Ollama service (e.g. executing local models like `llama3`).
+  - `OllamaProvider`: Communicates with a local, keyless Ollama service (e.g. executing local models like `llama3.1`).
   - `DemoProvider`: A local rule-based emulator mimicking LLM conversation patterns. It parses vehicle fitments, extracts parts category context, tracks SKU inventory states, manages order slots, and returns responses instantly without making external requests.
-* **Fallback Chain Design Decisions (Gemini -> Groq -> Ollama -> Demo)**:
-  1. **Google Gemini (Primary)**: Chosen for its robust native tool-calling features, large context windows, and superior RAG grounding capability.
-  2. **Groq Cloud (First Fallback)**: Selected because of its ultra-low latency response times and compatibility with Llama 3 models, making it an excellent drop-in cloud replacement when Gemini keys return 403 Denied or 429 Rate Limit responses.
-  3. **Ollama (Second Fallback)**: Selected to enable fully local LLM inference when external cloud APIs are unavailable or network timeouts occur, utilizing model configurations like `llama3`.
+* **Fallback Chain Design Decisions (Ollama -> Gemini -> Groq -> Demo)**:
+  1. **Ollama (Primary)**: Configured as the primary interface to enable fully local, keyless execution out of the box. We select `llama3.1` (or newer) because it natively supports tool-calling capabilities, unlike older versions like `llama3`.
+  2. **Google Gemini (First Fallback)**: Serves as the first cloud fallback using developer keys, providing high-quality grounding.
+  3. **Groq Cloud (Second Fallback)**: Provides ultra-low latency fallback access to hosted models like `llama-3.3-70b-versatile` if Gemini API projects are denied (403) or rate-limited (429).
   4. **Demo Mode (Final Local Fallback)**: Serves as the ultimate fail-safe safeguard. If the reviewer has no API keys and does not have Ollama installed locally, Demo Mode emulates the conversational flow (including semantic matches, stock lookups, and order creation) completely offline, ensuring the assistant is always testable and successful.
 * **Automatic Failover Routing**:
   The `GeminiAgent` coordinates the fallback routing. When the active provider initialization fails or encounters a connection or quota exception during execution:
   1. The agent intercepts the exception and catches connection/quota issues (403, 429, etc.).
-  2. It pops the next provider from the fallback pipeline configuration (`FALLBACK_PROVIDERS="groq,ollama,demo"`).
+  2. It pops the next provider from the fallback pipeline configuration (`FALLBACK_PROVIDERS="gemini,groq,demo"`).
   3. It dynamically instantiates the new provider, updates the active provider state, and retries the generation block.
   4. It logs the exact exception warning and switches to the next provider, printing details in real-time.
 * **RAG Context Separation & Pollution Prevention**:
