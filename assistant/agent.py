@@ -91,7 +91,7 @@ class GeminiAgent:
         self.tool_calls_log = []
         
         # Read provider settings and fallback pipeline
-        self.fallback_pipeline = [p.strip().lower() for p in os.environ.get("FALLBACK_PROVIDERS", "groq,demo").split(",") if p.strip()]
+        self.fallback_pipeline = [p.strip().lower() for p in os.environ.get("FALLBACK_PROVIDERS", "groq,ollama,demo").split(",") if p.strip()]
         
         # Initialize selected provider
         self.active_provider_name = os.environ.get("LLM_PROVIDER", "gemini").strip().lower()
@@ -101,6 +101,12 @@ class GeminiAgent:
         self.provider = None
         self._init_active_provider()
 
+    @property
+    def active_model_name(self) -> str:
+        if self.provider:
+            return self.provider.model_name
+        return "Unknown"
+
     def _init_active_provider(self):
         """
         Attempts to initialize the active provider. If initialization fails,
@@ -108,10 +114,8 @@ class GeminiAgent:
         """
         try:
             self.provider = self._create_provider_instance(self.active_provider_name)
-            print(f"[Agent] Active LLM Provider initialized: {self.active_provider_name.upper()}")
         except Exception as e:
-            print(f"[Warning] Failed to initialize provider '{self.active_provider_name}': {e}")
-            self._route_to_fallback()
+            self._route_to_fallback(error_msg=str(e))
 
     def _create_provider_instance(self, name: str):
         if name == "gemini":
@@ -125,25 +129,27 @@ class GeminiAgent:
         else:
             raise ValueError(f"Unknown LLM provider: {name}")
 
-    def _route_to_fallback(self):
+    def _route_to_fallback(self, error_msg: str = "Unknown error"):
         """
         Pops the next fallback provider from the pipeline and instantiates it.
         """
+        old_provider = self.active_provider_name.upper()
+        print(f"\n[Warning] {old_provider} failed ({error_msg})")
+        
         while self.fallback_pipeline:
             next_provider = self.fallback_pipeline.pop(0)
-            print(f"[Agent] Attempting to fall back to: {next_provider.upper()}")
+            print(f"Switching to {next_provider.capitalize()}...")
             try:
                 self.provider = self._create_provider_instance(next_provider)
                 self.active_provider_name = next_provider
-                print(f"[Agent] Successfully switched to fallback provider: {next_provider.upper()}")
+                print(f"Active Provider : {self.active_provider_name.capitalize()}")
+                print(f"Model           : {self.provider.model_name}\n")
                 return
             except Exception as e:
                 print(f"[Warning] Failed to initialize fallback '{next_provider}': {e}")
                 
-        # If pipeline exhausted, default to Demo mode
-        print("[Agent] Fallback pipeline exhausted. Initializing local DEMO MODE (keyless).")
-        self.provider = DemoProvider(system_instruction=SYSTEM_INSTRUCTION)
-        self.active_provider_name = "demo"
+        # If pipeline exhausted, raise RuntimeError
+        raise RuntimeError("Fallback pipeline exhausted. No functional LLM providers available.")
 
     def reset(self):
         """Clears memory and resets the inventory state."""
@@ -194,7 +200,7 @@ class GeminiAgent:
         while turn < max_turns:
             # Generate content using resilient provider wrapping
             response = None
-            retries = 3
+            retries = len(self.fallback_pipeline) + 2 # Allow trying active plus all fallbacks
             while retries > 0:
                 try:
                     response = self.provider.generate_content(
@@ -203,8 +209,12 @@ class GeminiAgent:
                     )
                     break
                 except Exception as e:
-                    print(f"[Warning] LLM Provider '{self.active_provider_name}' error: {e}")
-                    self._route_to_fallback()
+                    err_str = str(e)
+                    try:
+                        self._route_to_fallback(error_msg=err_str)
+                    except Exception as fe:
+                        print(f"[Error] Fallback routing failed: {fe}")
+                        return "I am sorry, all configured LLM providers are currently unavailable."
                     contents = list(self.memory.get_history()) # Refresh history format if needed
                     retries -= 1
                     

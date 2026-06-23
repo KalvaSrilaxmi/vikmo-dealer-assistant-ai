@@ -45,12 +45,17 @@ To ensure high availability and prevent the assistant from failing during review
   - `GroqProvider`: Sends structured HTTP payloads directly to Groq Cloud's OpenAI-compatible completions endpoint.
   - `OllamaProvider`: Communicates with a local, keyless Ollama service (e.g. executing local models like `llama3`).
   - `DemoProvider`: A local rule-based emulator mimicking LLM conversation patterns. It parses vehicle fitments, extracts parts category context, tracks SKU inventory states, manages order slots, and returns responses instantly without making external requests.
+* **Fallback Chain Design Decisions (Gemini -> Groq -> Ollama -> Demo)**:
+  1. **Google Gemini (Primary)**: Chosen for its robust native tool-calling features, large context windows, and superior RAG grounding capability.
+  2. **Groq Cloud (First Fallback)**: Selected because of its ultra-low latency response times and compatibility with Llama 3 models, making it an excellent drop-in cloud replacement when Gemini keys return 403 Denied or 429 Rate Limit responses.
+  3. **Ollama (Second Fallback)**: Selected to enable fully local LLM inference when external cloud APIs are unavailable or network timeouts occur, utilizing model configurations like `llama3`.
+  4. **Demo Mode (Final Local Fallback)**: Serves as the ultimate fail-safe safeguard. If the reviewer has no API keys and does not have Ollama installed locally, Demo Mode emulates the conversational flow (including semantic matches, stock lookups, and order creation) completely offline, ensuring the assistant is always testable and successful.
 * **Automatic Failover Routing**:
   The `GeminiAgent` coordinates the fallback routing. When the active provider initialization fails or encounters a connection or quota exception during execution:
   1. The agent intercepts the exception and catches connection/quota issues (403, 429, etc.).
-  2. It pops the next provider from the fallback pipeline configuration (`FALLBACK_PROVIDERS="groq,demo"`).
+  2. It pops the next provider from the fallback pipeline configuration (`FALLBACK_PROVIDERS="groq,ollama,demo"`).
   3. It dynamically instantiates the new provider, updates the active provider state, and retries the generation block.
-  4. If the fallback pipeline is exhausted, it automatically loads `DemoProvider` to guarantee the session remains active and functional.
+  4. It logs the exact exception warning and switches to the next provider, printing details in real-time.
 * **RAG Context Separation & Pollution Prevention**:
   Because the RAG context block is injected directly into user prompt history for grounding, a simple rule-based emulator like `DemoProvider` can suffer from RAG pollution (e.g. extracting candidate SKUs returned by semantic retrieval and thinking they are user stock-check requests). To prevent this, `DemoProvider` strips the `[Grounded Catalogue Context]` block from the user query before matching intents.
 * **Windows Console Encoding Protection**:

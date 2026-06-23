@@ -296,6 +296,7 @@ class DemoProvider(BaseLLMProvider):
     """
     def __init__(self, system_instruction: str = None):
         super().__init__(system_instruction)
+        self.model_name = "Rule-based Emulator"
         
     def generate_content(self, contents: list, tools: list = None) -> LLMResponse:
         # Check if the very last message in contents is a tool response

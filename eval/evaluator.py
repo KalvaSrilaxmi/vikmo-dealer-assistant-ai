@@ -48,7 +48,7 @@ def run_evaluation():
         agent = GeminiAgent()
     except Exception as e:
         print(f"[Error] Failed to initialize agent for evaluation: {e}")
-        print("Please ensure your active LLM API keys are set, or set DEMO_MODE=true.")
+        print("Please ensure your active LLM API keys are set, or that local fallback services are running.")
         return
 
     results = []

@@ -56,47 +56,62 @@ pip install -r requirements.txt
 ```
 
 ### Step 2: Configure Environment Variables
-The assistant features a resilient abstraction layer. You can configure multiple providers and fallbacks.
+The assistant features a resilient abstraction layer. You can configure multiple LLM providers and fallbacks.
 
 Key configuration variables:
 - `LLM_PROVIDER`: Set to `gemini`, `groq`, `ollama`, or `demo` (default: `gemini`).
-- `FALLBACK_PROVIDERS`: Comma-separated order of fallback providers if the primary fails (default: `groq,demo`).
-- `DEMO_MODE`: Set to `true` to run offline/keyless local Demo Mode immediately.
+- `FALLBACK_PROVIDERS`: Comma-separated order of fallback providers if the primary fails (default: `groq,ollama,demo`).
 - `GEMINI_API_KEY`: API Key for Google Gemini.
 - `GROQ_API_KEY`: API Key for Groq Cloud API.
 - `GROQ_MODEL`: Groq model name (default: `llama3-8b-8192`).
 - `OLLAMA_MODEL`: Ollama model name (default: `llama3`).
 - `OLLAMA_HOST`: Local Ollama service host (default: `http://localhost:11434`).
+- `DEMO_MODE`: Set to `true` to run offline/keyless local Demo Mode immediately.
 
-You can set these in your environment:
-- **Windows (PowerShell)**:
-  ```powershell
-  $env:LLM_PROVIDER="gemini"
-  $env:GEMINI_API_KEY="your_api_key"
-  ```
-- **Linux/macOS**:
-  ```bash
-  export LLM_PROVIDER="gemini"
-  export GEMINI_API_KEY="your_api_key"
-  ```
+#### Provider Setup & Verification Commands:
 
-To run without any API keys or external connections (ideal for review and validation), configure the assistant to run in **Demo Mode**:
-- **Windows (PowerShell)**:
-  ```powershell
-  $env:DEMO_MODE="true"
-  ```
-- **Linux/macOS**:
-  ```bash
-  export DEMO_MODE="true"
-  ```
+1. **Google Gemini (Primary)**:
+   Ensure `GEMINI_API_KEY` is configured in your environment or `.env` file.
+   Verify with:
+   ```bash
+   # Windows (PowerShell)
+   $env:LLM_PROVIDER="gemini"
+   python assistant/cli.py
+   ```
+
+2. **Groq Cloud (First Fallback)**:
+   Ensure `GROQ_API_KEY` is configured.
+   Verify with:
+   ```bash
+   # Windows (PowerShell)
+   $env:LLM_PROVIDER="groq"
+   python assistant/cli.py
+   ```
+
+3. **Ollama (Second Fallback)**:
+   Ensure Ollama is running locally with the target model installed (e.g. `ollama run llama3`).
+   Verify with:
+   ```bash
+   # Windows (PowerShell)
+   $env:LLM_PROVIDER="ollama"
+   $env:OLLAMA_MODEL="llama3"
+   python assistant/cli.py
+   ```
+
+4. **Demo Mode (Final Local Fallback)**:
+   Forces offline rule-based emulation locally without any key or network requirements.
+   Verify with:
+   ```bash
+   # Windows (PowerShell)
+   $env:DEMO_MODE="true"
+   python assistant/cli.py
+   ```
 
 Alternatively, create a file named `.env` in the root directory of the workspace:
 ```env
-DEMO_MODE=true
-# Or configure keys
-# LLM_PROVIDER=gemini
-# GEMINI_API_KEY=your_key
-# FALLBACK_PROVIDERS=groq,demo
+LLM_PROVIDER=gemini
+GEMINI_API_KEY=your_key
+FALLBACK_PROVIDERS=groq,ollama,demo
 ```
 The agent loads `.env` variables automatically.
 
@@ -118,6 +133,28 @@ python assistant/cli.py
 ```
 - Type **`reset`** in the prompt to clear history and reset inventory stock levels.
 - Type **`exit`** or **`quit`** to exit the program.
+
+### Dynamic Failover Behavior & CLI Outputs
+
+On CLI startup, the initialized provider, active model, and fallback chain are displayed:
+```
+============================================================
+Active Provider : Gemini
+Model           : gemini-2.5-flash
+Fallback Chain  : Groq -> Ollama -> Demo
+============================================================
+```
+
+If the active provider fails at runtime (e.g. due to rate limits or invalid keys), the agent logs the specific failure and prints failover warnings:
+```
+[Warning] GEMINI failed (429 Quota Exceeded)
+Switching to Groq...
+Active Provider : Groq
+Model           : llama3-8b-8192
+```
+
+Reviewers can trace which provider and model generated each response via the response prefixes:
+`Assistant (via Groq - llama3-8b-8192): I found the following compatible parts:...`
 
 ### B. Run the Automated Agent Evaluation
 Run the test suite against the evaluation cases:
