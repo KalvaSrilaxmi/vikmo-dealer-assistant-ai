@@ -281,9 +281,54 @@ class OllamaProvider(BaseLLMProvider):
                         "name": fn["name"],
                         "args": args
                     })
+            
+            # Fallback: extract tool calls narrated as JSON text by local LLMs
+            # e.g. "I will call `find_parts_by_vehicle`... {"name": "find_parts_by_vehicle", "parameters": {...}}"
+            if not tool_calls and text and tools:
+                tool_calls = self._extract_tool_calls_from_text(text)
+                if tool_calls:
+                    text = ""  # Clear narration text since we extracted the tool call
+                    
             return LLMResponse(text=text, tool_calls=tool_calls)
         except Exception as e:
             raise RuntimeError(f"Failed calling Ollama endpoint: {e}")
+
+    def _extract_tool_calls_from_text(self, text: str) -> list:
+        """
+        Attempts to parse tool calls from LLM text output that narrates a JSON tool call.
+        Handles patterns like:
+        - {"name": "find_parts_by_vehicle", "parameters": {...}}
+        - {"name": "check_stock", "arguments": {...}}
+        """
+        valid_tools = {"find_parts_by_vehicle", "check_stock", "create_order"}
+        tool_calls = []
+        
+        # Find all JSON-like objects in the text
+        json_pattern = re.compile(r'\{[^{}]*(?:\{[^{}]*\}[^{}]*)?\}', re.DOTALL)
+        candidates = json_pattern.findall(text)
+        
+        for candidate in candidates:
+            try:
+                obj = json.loads(candidate)
+                name = obj.get("name") or obj.get("function")
+                if name and name in valid_tools:
+                    args = obj.get("parameters") or obj.get("arguments") or obj.get("args") or {}
+                    if isinstance(args, str):
+                        try:
+                            args = json.loads(args)
+                        except Exception:
+                            args = {}
+                    tool_calls.append({
+                        "id": None,
+                        "name": name,
+                        "args": args
+                    })
+            except Exception:
+                continue
+                
+        return tool_calls
+
+
 
 class DemoProvider(BaseLLMProvider):
     """

@@ -19,12 +19,12 @@ Strict Operational Guidelines:
 Expected Conversation Flow Example:
 User: I need brake pads.
 Assistant: For which vehicle?
-User: Bajaj Pulsar 150
+User: Fictional Cruiser 500
 Assistant: I found the following compatible parts:
-  1. SKU: BRK-1002 | Brake Pad Set — Bajaj Pulsar 150 | Brand: TVS
+  1. SKU: XYZ-9999 | Brake Pad Set — Fictional Cruiser 500 | Brand: TVS
   Which SKU would you like more details about?
-User: BRK-1002
-Assistant: BRK-1002 is in stock.
+User: XYZ-9999
+Assistant: XYZ-9999 is in stock.
   Price: ₹1460
   Available Quantity: 136
   Would you like to place an order?
@@ -171,12 +171,49 @@ class GeminiAgent:
         # 1. Query the semantic retriever to get grounding context for the user's input
         # Skip RAG context injection for simple greetings and out-of-domain queries to prevent RAG pollution
         cleaned_msg = user_message.strip().lower()
-        is_greeting = cleaned_msg in ["hi", "hello", "hey", "greetings", "good morning", "good afternoon", "good evening", "yo", "sup"]
+        is_greeting = cleaned_msg in ["hi", "hello", "hey", "greetings", "good morning", "good afternoon", "good evening", "yo", "sup"] or cleaned_msg.startswith(("hi ", "hello ", "hey "))
+        
+        if is_greeting:
+            greeting_resp = "Hi, welcome to VIKMO Auto Parts! How can I help you today?"
+            self.memory.add_user_message(user_message)
+            self.memory.add_model_response(greeting_resp)
+            return greeting_resp
+
         ood_keywords = ["weather", "recipe", "cookie", "poem", "news", "cricket", "song", "joke", "capital of", "france"]
         is_ood = any(kw in cleaned_msg for kw in ood_keywords)
         
+        # Check if the query is ambiguous (asks for parts/stock/filters but does not specify vehicle fitment or SKU, and no context exists)
+        intent_keywords = ["part", "pad", "brake", "filter", "plug", "tyre", "chain", "oil", "mirror", "lever", "cable", "accessory", "accessories", "horn", "light", "clutch", "stock", "price", "avail"]
+        has_intent = any(kw in cleaned_msg for kw in intent_keywords)
+        
+        vehicle_brands_models = [
+            "pulsar", "seltos", "meteor", "apache", "unicorn", "hornet", "shine", "splendor", "swift", "gixxer", "baleno", "creta", "alto", "duke", "dominar", "himalayan", "fz", "r15", "mt-15", "classic", "bullet", "city", "activa", "jupiter", "platina", "passion", "access", "dio",
+            "yamaha", "honda", "suzuki", "bajaj", "royal enfield", "ktm", "kia", "maruti", "hyundai", "tvs", "hero"
+        ]
+        has_vehicle = any(v in cleaned_msg for v in vehicle_brands_models)
+        
+        import re
+        has_sku = bool(re.search(r'\b[a-zA-Z]{3,4}-\d{4}\b', cleaned_msg))
+        
+        # Check history for context
+        has_history_sku = False
+        has_history_vehicle = False
+        for msg in self.memory.get_history():
+            parts = msg.get("parts", [])
+            for part in parts:
+                if isinstance(part, str):
+                    part_lower = part.lower()
+                    if any(v in part_lower for v in vehicle_brands_models):
+                        has_history_vehicle = True
+                    if re.search(r'\b[a-zA-Z]{3,4}-\d{4}\b', part_lower):
+                        has_history_sku = True
+                elif isinstance(part, dict):
+                    has_history_sku = True
+                    
+        is_ambiguous = has_intent and not (has_vehicle or has_sku or has_history_sku or has_history_vehicle)
+        
         rag_results = []
-        if not (is_greeting or is_ood):
+        if not (is_ood or is_ambiguous):
             try:
                 rag_results = self.retriever.retrieve(user_message, top_k=4)
             except Exception as e:
@@ -197,7 +234,7 @@ class GeminiAgent:
         # 2. Append User Message with context block
         augmented_message = f"{user_message}\n\n{context_block}"
         self.memory.add_user_message(augmented_message)
-        active_tools = None if (is_greeting or is_ood) else self.tools_list
+        active_tools = None if (is_greeting or is_ood or is_ambiguous) else self.tools_list
         
         # 3. Execution loop (handles potential multi-step tool calls)
         max_turns = 5
