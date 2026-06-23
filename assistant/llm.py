@@ -62,7 +62,7 @@ class GeminiProvider(BaseLLMProvider):
         text = response.text if response.text else ""
         return LLMResponse(text=text, tool_calls=tool_calls)
 
-def translate_history_to_openai(contents: list, system_instruction: str = None) -> list:
+def translate_history_to_openai(contents: list, system_instruction: str = None, arguments_as_object: bool = False) -> list:
     """
     Translates Gemini history list structure to OpenAI-compatible messages schema.
     """
@@ -83,19 +83,21 @@ def translate_history_to_openai(contents: list, system_instruction: str = None) 
             elif isinstance(part, dict):
                 if "function_call" in part:
                     fc = part["function_call"]
+                    tc_id = fc.get("id") or f"call_{fc['name']}"
                     tool_calls.append({
-                        "id": f"call_{fc['name']}",
+                        "id": tc_id,
                         "type": "function",
                         "function": {
                             "name": fc["name"],
-                            "arguments": json.dumps(fc["args"])
+                            "arguments": fc["args"] if arguments_as_object else json.dumps(fc["args"])
                         }
                     })
                 elif "function_response" in part:
                     fr = part["function_response"]
+                    tc_id = fr.get("id") or f"call_{fr['name']}"
                     messages.append({
                         "role": "tool",
-                        "tool_call_id": f"call_{fr['name']}",
+                        "tool_call_id": tc_id,
                         "name": fr["name"],
                         "content": json.dumps(fr["response"])
                     })
@@ -164,20 +166,12 @@ OPENAI_TOOLS = [
                         "type": "string",
                         "description": "Name of the dealer/business placing the order (e.g. 'ABC Motors')."
                     },
-                    "items": {
-                        "type": "array",
-                        "description": "A list of dicts, each with keys 'sku' (string) and 'quantity' (integer).",
-                        "items": {
-                            "type": "object",
-                            "properties": {
-                                "sku": {"type": "string"},
-                                "quantity": {"type": "integer"}
-                            },
-                            "required": ["sku", "quantity"]
-                        }
+                    "items_json": {
+                        "type": "string",
+                        "description": "JSON string representing the list of items to order, e.g. '[{\"sku\": \"BRK-1002\", \"quantity\": 5}]'."
                     }
                 },
-                "required": ["dealer_name", "items"]
+                "required": ["dealer_name", "items_json"]
             }
         }
     }
@@ -232,6 +226,7 @@ class GroqProvider(BaseLLMProvider):
                     except Exception:
                         args = {}
                     tool_calls.append({
+                        "id": tc.get("id"),
                         "name": fn["name"],
                         "args": args
                     })
@@ -249,7 +244,7 @@ class OllamaProvider(BaseLLMProvider):
         self.host = os.environ.get("OLLAMA_HOST", "http://localhost:11434")
 
     def generate_content(self, contents: list, tools: list = None) -> LLMResponse:
-        messages = translate_history_to_openai(contents, self.system_instruction)
+        messages = translate_history_to_openai(contents, self.system_instruction, arguments_as_object=True)
         
         payload = {
             "model": self.model_name,
@@ -282,6 +277,7 @@ class OllamaProvider(BaseLLMProvider):
                     except Exception:
                         args = {}
                     tool_calls.append({
+                        "id": tc.get("id"),
                         "name": fn["name"],
                         "args": args
                     })
@@ -416,7 +412,7 @@ class DemoProvider(BaseLLMProvider):
         # 2. Greetings
         if query in ["hello", "hi", "hey", "greetings"]:
             return LLMResponse(
-                text="Hello! I am VIKMO Auto-Parts Assistant. How can I help you find parts, check stock, or place orders today?"
+                text="Hi, welcome to VIKMO Auto Parts! How can I help you today?"
             )
             
         # Parse potential SKU match in query
