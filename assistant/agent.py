@@ -169,11 +169,18 @@ class GeminiAgent:
         Implements automatic fallback if providers crash or hit quotas.
         """
         # 1. Query the semantic retriever to get grounding context for the user's input
+        # Skip RAG context injection for simple greetings and out-of-domain queries to prevent RAG pollution
+        cleaned_msg = user_message.strip().lower()
+        is_greeting = cleaned_msg in ["hi", "hello", "hey", "greetings", "good morning", "good afternoon", "good evening", "yo", "sup"]
+        ood_keywords = ["weather", "recipe", "cookie", "poem", "news", "cricket", "song", "joke", "capital of", "france"]
+        is_ood = any(kw in cleaned_msg for kw in ood_keywords)
+        
         rag_results = []
-        try:
-            rag_results = self.retriever.retrieve(user_message, top_k=4)
-        except Exception as e:
-            print(f"[Warning] RAG retrieval failed: {e}")
+        if not (is_greeting or is_ood):
+            try:
+                rag_results = self.retriever.retrieve(user_message, top_k=4)
+            except Exception as e:
+                print(f"[Warning] RAG retrieval failed: {e}")
             
         # Format the RAG context block
         context_block = "\n[Grounded Catalogue Context (Top Semantic Matches)]:\n"
@@ -190,6 +197,7 @@ class GeminiAgent:
         # 2. Append User Message with context block
         augmented_message = f"{user_message}\n\n{context_block}"
         self.memory.add_user_message(augmented_message)
+        active_tools = None if (is_greeting or is_ood) else self.tools_list
         
         # 3. Execution loop (handles potential multi-step tool calls)
         max_turns = 5
@@ -205,7 +213,7 @@ class GeminiAgent:
                 try:
                     response = self.provider.generate_content(
                         contents=contents,
-                        tools=self.tools_list
+                        tools=active_tools
                     )
                     break
                 except Exception as e:
@@ -240,6 +248,7 @@ class GeminiAgent:
             for tc in response.tool_calls:
                 parts_dicts.append({
                     "function_call": {
+                        "id": tc.get("id"),
                         "name": tc["name"],
                         "args": clean_args(tc["args"])
                     }
@@ -256,6 +265,20 @@ class GeminiAgent:
                 fn_name = tc["name"]
                 fn_args = clean_args(tc["args"])
                 
+                # Decode JSON strings to python objects if using simplified tools schema
+                if fn_name == "create_order":
+                    if "items_json" in fn_args:
+                        try:
+                            fn_args["items"] = json.loads(fn_args["items_json"])
+                            del fn_args["items_json"]
+                        except Exception:
+                            pass
+                    if isinstance(fn_args.get("items"), str):
+                        try:
+                            fn_args["items"] = json.loads(fn_args["items"])
+                        except Exception:
+                            pass
+                
                 print(f"[Agent] Executing tool '{fn_name}' with args: {fn_args}")
                 self.tool_calls_log.append(fn_name)
                 
@@ -269,6 +292,7 @@ class GeminiAgent:
                 
                 tool_response_parts.append({
                     "function_response": {
+                        "id": tc.get("id"),
                         "name": fn_name,
                         "response": tool_result
                     }
