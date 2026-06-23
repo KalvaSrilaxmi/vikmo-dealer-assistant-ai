@@ -262,7 +262,7 @@ class OllamaProvider(BaseLLMProvider):
             
         url = f"{self.host}/api/chat"
         try:
-            response = requests.post(url, json=payload, timeout=30)
+            response = requests.post(url, json=payload, timeout=60)
             if response.status_code != 200:
                 raise RuntimeError(f"Ollama returned status {response.status_code}: {response.text}")
                 
