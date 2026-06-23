@@ -362,11 +362,56 @@ class DemoProvider(BaseLLMProvider):
         query = user_msg.strip().lower()
         
         # 1. Out-of-Domain Guardrails
-        ood_keywords = ["weather", "recipe", "cookie", "poem", "news", "cricket", "song", "joke"]
+        ood_keywords = [
+            "weather", "recipe", "cookie", "poem", "news", "cricket", "song", "joke",
+            "capital", "france", "paris", "geographic", "president", "math", "calculate",
+            "translate", "who is", "who wrote", "what is the capital"
+        ]
         if any(kw in query for kw in ood_keywords):
             return LLMResponse(
                 text="I apologize, but I can only assist with auto-parts inquiries, stock checks, and order processing."
             )
+            
+        # Check if the assistant asked for the dealer name, quantity, or to place an order in its last response
+        asked_for_dealer = False
+        asked_for_qty = False
+        asked_to_place_order = False
+        for msg in reversed(contents):
+            if msg["role"] in ["model", "assistant"]:
+                for part in msg.get("parts", []):
+                    if isinstance(part, str):
+                        part_lower = part.lower()
+                        if "dealer name" in part_lower:
+                            asked_for_dealer = True
+                        if "how many units" in part_lower or "how many" in part_lower:
+                            asked_for_qty = True
+                        if "place an order" in part_lower or "place order" in part_lower or "would you like to order" in part_lower:
+                            asked_to_place_order = True
+                break # Only inspect the most recent model message
+                
+        # Check if a successful order was created in the conversation history
+        successful_order_id = None
+        for msg in contents:
+            parts = msg.get("parts", [])
+            for part in parts:
+                if isinstance(part, dict) and "function_response" in part:
+                    fr = part["function_response"]
+                    if fr.get("name") == "create_order":
+                        resp = fr.get("response", {})
+                        if resp.get("status") == "SUCCESS":
+                            successful_order_id = resp.get("order_id")
+                            
+        # If user asks about status/confirmation
+        is_confirmation_query = any(w in query for w in ["confirm", "status", "placed", "success"])
+        if is_confirmation_query and (successful_order_id or not (asked_for_qty or asked_for_dealer)):
+            if successful_order_id:
+                return LLMResponse(
+                    text=f"Yes, order {successful_order_id} is confirmed and has been processed successfully."
+                )
+            else:
+                return LLMResponse(
+                    text="No order has been placed or confirmed yet. How can I help you find compatible parts, check stock, or place an order?"
+                )
             
         # 2. Greetings
         if query in ["hello", "hi", "hey", "greetings"]:
@@ -377,8 +422,9 @@ class DemoProvider(BaseLLMProvider):
         # Parse potential SKU match in query
         skus_in_query = re.findall(r'\b([A-Z]{3,4}-\d{4})\b', user_msg.upper())
         
-        # Look for quantity
-        qtys_in_query = re.findall(r'\b(\d+)\b', query)
+        # Look for quantity (strip SKU patterns first so their numbers don't match)
+        clean_user_msg_for_qty = re.sub(r'\b[A-Z]{3,4}-\d{4}\b', '', user_msg.upper())
+        qtys_in_query = re.findall(r'\b(\d+)\b', clean_user_msg_for_qty)
         qty = int(qtys_in_query[0]) if qtys_in_query else None
         
         # Look for dealer name
@@ -389,21 +435,16 @@ class DemoProvider(BaseLLMProvider):
             if len(words) > 3:
                 dealer_name = " ".join(words[:2])
                 
-        is_order_intent = any(w in query for w in ["order", "buy", "purchase"])
+        is_yes_response = any(w in query for w in ["yes", "yep", "yeah", "sure", "ok", "please", "confirm"])
+        is_order_intent = (
+            any(w in query for w in ["order", "buy", "purchase"])
+            or (asked_to_place_order and is_yes_response)
+            or asked_for_qty
+            or asked_for_dealer
+        )
         
-        # Check if the assistant asked for the dealer name recently
-        asked_for_dealer = False
-        for msg in reversed(contents):
-            if msg["role"] in ["model", "assistant"]:
-                for part in msg.get("parts", []):
-                    if isinstance(part, str) and "dealer name" in part.lower():
-                        asked_for_dealer = True
-                        break
-            if asked_for_dealer:
-                break
-                
         # 3. Handle Order Intent
-        if is_order_intent or asked_for_dealer:
+        if is_order_intent:
             if not skus_in_query:
                 # Try to resolve SKU from history (multi-turn reference)
                 for msg in reversed(contents):
@@ -433,7 +474,9 @@ class DemoProvider(BaseLLMProvider):
                                 hist_user_msg = part
                                 if "\n[Grounded Catalogue Context" in hist_user_msg:
                                     hist_user_msg = hist_user_msg.split("\n[Grounded Catalogue Context")[0].strip()
-                                hist_qtys = re.findall(r'\b(\d+)\b', hist_user_msg.lower())
+                                # Clean SKU patterns first
+                                hist_user_msg_clean = re.sub(r'\b[A-Z]{3,4}-\d{4}\b', '', hist_user_msg.upper())
+                                hist_qtys = re.findall(r'\b(\d+)\b', hist_user_msg_clean)
                                 if hist_qtys:
                                     qty = int(hist_qtys[0])
                                     break
